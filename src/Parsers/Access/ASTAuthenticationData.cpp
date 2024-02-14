@@ -119,6 +119,12 @@ void ASTAuthenticationData::formatImpl(const FormatSettings & settings, FormatSt
                 password = true;
                 break;
             }
+            case AuthenticationType::EXTERNAL_SSH_LIST:
+            {
+                prefix = "BY";
+                parameters = true;
+                break;
+            }
             case AuthenticationType::SSH_KEY:
             {
                 prefix = "BY";

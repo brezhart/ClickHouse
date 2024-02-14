@@ -113,6 +113,7 @@ bool Authentication::areCredentialsValid(
             case AuthenticationType::SSL_CERTIFICATE:
                 throw Authentication::Require<BasicCredentials>("ClickHouse X.509 Authentication");
 
+            case AuthenticationType::EXTERNAL_SSH_LIST:
             case AuthenticationType::SSH_KEY:
                 throw Authentication::Require<SshCredentials>("Ssh Keys Authentication");
 
@@ -143,7 +144,7 @@ bool Authentication::areCredentialsValid(
 
             case AuthenticationType::SSL_CERTIFICATE:
                 throw Authentication::Require<BasicCredentials>("ClickHouse X.509 Authentication");
-
+            case AuthenticationType::EXTERNAL_SSH_LIST:
             case AuthenticationType::SSH_KEY:
                 throw Authentication::Require<SshCredentials>("Ssh Keys Authentication");
 
@@ -177,6 +178,7 @@ bool Authentication::areCredentialsValid(
             case AuthenticationType::SSL_CERTIFICATE:
                 throw Authentication::Require<BasicCredentials>("ClickHouse X.509 Authentication");
 
+            case AuthenticationType::EXTERNAL_SSH_LIST:
             case AuthenticationType::SSH_KEY:
                 throw Authentication::Require<SshCredentials>("Ssh Keys Authentication");
 
@@ -215,6 +217,7 @@ bool Authentication::areCredentialsValid(
             case AuthenticationType::SSL_CERTIFICATE:
                 return auth_data.getSSLCertificateCommonNames().contains(ssl_certificate_credentials->getCommonName());
 
+            case AuthenticationType::EXTERNAL_SSH_LIST:
             case AuthenticationType::SSH_KEY:
                 throw Authentication::Require<SshCredentials>("Ssh Keys Authentication");
 
@@ -242,6 +245,7 @@ bool Authentication::areCredentialsValid(
             case AuthenticationType::SSL_CERTIFICATE:
                 throw Authentication::Require<SSLCertificateCredentials>("ClickHouse X.509 Authentication");
 
+            case AuthenticationType::EXTERNAL_SSH_LIST: // assert(NOT_REACHEBLE)
             case AuthenticationType::SSH_KEY:
 #if USE_SSH
                 return checkSshSignature(auth_data.getSSHKeys(), ssh_credentials->getSignature(), ssh_credentials->getOriginal());

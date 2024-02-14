@@ -6,7 +6,13 @@
 #include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/Access/ASTPublicSSHKey.h>
+#include <Parsers/Access/ParserSSHList.h>
+#include <Parsers/Access/ASTExternalSSHList.h>
 #include <Storages/checkAndGetLiteralArgument.h>
+#include <IO/ReadWriteBufferFromHTTP.h>
+#include <Parsers/IParserBase.h>
+#include <Parsers/ExpressionListParsers.h>
+
 
 #include <Common/OpenSSLHelpers.h>
 #include <Poco/SHA1Engine.h>
@@ -128,6 +134,7 @@ void AuthenticationData::setPassword(const String & password_)
         case AuthenticationType::LDAP:
         case AuthenticationType::KERBEROS:
         case AuthenticationType::SSL_CERTIFICATE:
+        case AuthenticationType::EXTERNAL_SSH_LIST:
         case AuthenticationType::SSH_KEY:
         case AuthenticationType::HTTP:
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot specify password for authentication type {}", toString(type));
@@ -233,6 +240,7 @@ void AuthenticationData::setPasswordHashBinary(const Digest & hash)
         case AuthenticationType::LDAP:
         case AuthenticationType::KERBEROS:
         case AuthenticationType::SSL_CERTIFICATE:
+        case AuthenticationType::EXTERNAL_SSH_LIST:
         case AuthenticationType::SSH_KEY:
         case AuthenticationType::HTTP:
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot specify password binary hash for authentication type {}", toString(type));
@@ -318,6 +326,12 @@ std::shared_ptr<ASTAuthenticationData> AuthenticationData::toAST() const
 
             break;
         }
+        case AuthenticationType::EXTERNAL_SSH_LIST:
+        {
+            node->type = AuthenticationType::SSH_KEY;
+            node->children.push_back(std::make_shared<ASTPublicSSHKey>("AAAAC3NzaC1lZDI1NTE5AAAAIJIMLDEoscWPaU9RMy6kqVNdpMImrVRz9G+S/Jzzq/tZ", "ssh-ed25519"));\
+            break;
+        }
         case AuthenticationType::SSH_KEY:
         {
 #if USE_SSH
@@ -349,6 +363,74 @@ AuthenticationData AuthenticationData::fromAST(const ASTAuthenticationData & que
 {
     if (query.type && query.type == AuthenticationType::NO_PASSWORD)
         return AuthenticationData();
+
+
+    if (query.type && query.type == AuthenticationType::EXTERNAL_SSH_LIST){
+        AuthenticationData auth_data(AuthenticationType::SSH_KEY);
+        std::vector<ssh::SSHKey> keys;
+        size_t args_size = query.children.size();
+        for (size_t i = 0; i < args_size; ++i)
+        {
+            const auto & external_list = query.children[i]->as<ASTExternalSSHList&>();
+            auto login = external_list.login;
+            auto service = external_list.service;
+            Poco::URI uri("http://github.com/"+login+".keys");
+            Poco::Net::HTTPBasicCredentials creds{};
+
+            std::unique_ptr<ReadWriteBufferFromHTTP> in = std::make_unique<ReadWriteBufferFromHTTP>(
+                uri,
+                Poco::Net::HTTPRequest::HTTP_GET,
+                nullptr,
+                ConnectionTimeouts{},
+                creds,
+                DBMS_DEFAULT_BUFFER_SIZE,
+                2);
+//            size_t a = in->getFileInfo().file_size.value();
+            size_t file_size = in->getFileInfo().file_size.value();
+            [[maybe_unused]] char * buff = static_cast<char*>(malloc(file_size));
+            [[maybe_unused]] size_t readed = in->read(buff,file_size);
+            // TODO: user parsers
+//            auto tokens = Tokens(buff, buff+file_size);
+//            auto pos = IParserBase::Pos(tokens, 1000000);
+//            ASTPtr value;
+//            Expected expected;
+//            ParserList{std::make_unique<ParserSSHList>(), std::make_unique<ParserToken>(TokenType::Spaceship), false}.parse(pos, value, expected);
+//            size_t keys_amount = value->children.size();
+            std::vector<String>parsed;
+            std::string curr;
+            for (size_t j = 0; j < file_size; j++){
+                if (isspace(buff[j])){
+                    if (curr.size() > 0){
+                        parsed.push_back(curr);
+                        curr.clear();
+                    }
+                } else {
+                    curr+=buff[j];
+                }
+            }
+            if (curr.size()){
+                parsed.push_back(curr);
+            }
+            for (size_t j = 1; j < parsed.size(); j+=2){
+
+//                const auto & ssh_key = value->children[j]->as<ASTPublicSSHKey &>();
+//                const auto & key_base64 = ssh_key.key_base64;
+//                const auto & type = ssh_key.type;
+                //const auto & ssh_key = value->children[j]->as<ASTPublicSSHKey &>();
+                const auto & key_base64 = parsed[j];
+                const auto & type =  parsed[j-1];
+                try
+                {
+                    keys.emplace_back(ssh::SSHKeyFactory::makePublicFromBase64(key_base64, type));
+                }
+                catch (const std::invalid_argument &)
+                {
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS, "Bad SSH key in entry: {} with type {}", key_base64, type);
+                }
+            }
+        }
+        return auth_data;
+    }
 
     /// For this type of authentication we have ASTPublicSSHKey as children for ASTAuthenticationData
     if (query.type && query.type == AuthenticationType::SSH_KEY)

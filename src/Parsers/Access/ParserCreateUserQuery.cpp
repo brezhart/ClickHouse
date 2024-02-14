@@ -8,6 +8,7 @@
 #include <Parsers/Access/ParserRolesOrUsersSet.h>
 #include <Parsers/Access/ParserSettingsProfileElement.h>
 #include <Parsers/Access/ParserUserNameWithHost.h>
+#include <Parsers/Access/ParserExternalSSHList.h>
 #include <Parsers/Access/ParserPublicSSHKey.h>
 #include <Parsers/Access/parseUserName.h>
 #include <Parsers/ASTLiteral.h>
@@ -66,6 +67,7 @@ namespace
             bool expect_ldap_server_name = false;
             bool expect_kerberos_realm = false;
             bool expect_common_names = false;
+            bool expect_external_ssh_list = false;
             bool expect_public_ssh_key = false;
             bool expect_http_auth_server = false;
 
@@ -84,6 +86,8 @@ namespace
                             expect_kerberos_realm = true;
                         else if (check_type == AuthenticationType::SSL_CERTIFICATE)
                             expect_common_names = true;
+                        else if (check_type == AuthenticationType::EXTERNAL_SSH_LIST)
+                            expect_external_ssh_list = true;
                         else if (check_type == AuthenticationType::SSH_KEY)
                             expect_public_ssh_key = true;
                         else if (check_type == AuthenticationType::HTTP)
@@ -160,6 +164,12 @@ namespace
                     return false;
 
                 if (!ParserList{std::make_unique<ParserStringAndSubstitution>(), std::make_unique<ParserToken>(TokenType::Comma), false}.parse(pos, common_names, expected))
+                    return false;
+            }else if (expect_external_ssh_list){
+                if (!ParserKeyword{"BY"}.ignore(pos, expected))
+                    return false;
+
+                if (!ParserList{std::make_unique<ParserExternalSSHList>(), std::make_unique<ParserToken>(TokenType::Comma), false}.parse(pos, common_names, expected))
                     return false;
             }
             else if (expect_public_ssh_key)

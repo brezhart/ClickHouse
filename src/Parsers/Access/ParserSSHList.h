@@ -1,16 +1,16 @@
 #pragma once
 
 #include <Parsers/IParserBase.h>
+#include <Parsers/Access/ASTExternalSSHList.h>
 
 
 namespace DB
 {
 
-class ParserSSHList : public IParserBase
+class ParserSSHList
 {
-protected:
-    const char * getName() const override { return "SSHList"; }
-    bool parseImpl(Pos & pos, ASTPtr & node, Expected & expected) override;
+public:
+    static std::vector<std::pair<String, String>> parse(const ASTExternalSSHList & external_list);
 };
 
 }

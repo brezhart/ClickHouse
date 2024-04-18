@@ -329,7 +329,6 @@ std::shared_ptr<ASTAuthenticationData> AuthenticationData::toAST() const
         case AuthenticationType::EXTERNAL_SSH_LIST:
         {
             node->type = AuthenticationType::SSH_KEY;
-            node->children.push_back(std::make_shared<ASTPublicSSHKey>("AAAAC3NzaC1lZDI1NTE5AAAAIJIMLDEoscWPaU9RMy6kqVNdpMImrVRz9G+S/Jzzq/tZ", "ssh-ed25519"));\
             break;
         }
         case AuthenticationType::SSH_KEY:
@@ -372,53 +371,8 @@ AuthenticationData AuthenticationData::fromAST(const ASTAuthenticationData & que
         for (size_t i = 0; i < args_size; ++i)
         {
             const auto & external_list = query.children[i]->as<ASTExternalSSHList&>();
-            auto login = external_list.login;
-            auto service = external_list.service;
-            Poco::URI uri("http://github.com/"+login+".keys");
-            Poco::Net::HTTPBasicCredentials creds{};
-
-            std::unique_ptr<ReadWriteBufferFromHTTP> in = std::make_unique<ReadWriteBufferFromHTTP>(
-                uri,
-                Poco::Net::HTTPRequest::HTTP_GET,
-                nullptr,
-                ConnectionTimeouts{},
-                creds,
-                DBMS_DEFAULT_BUFFER_SIZE,
-                2);
-//            size_t a = in->getFileInfo().file_size.value();
-            size_t file_size = in->getFileInfo().file_size.value();
-            [[maybe_unused]] char * buff = static_cast<char*>(malloc(file_size));
-            [[maybe_unused]] size_t readed = in->read(buff,file_size);
-            // TODO: user parsers
-//            auto tokens = Tokens(buff, buff+file_size);
-//            auto pos = IParserBase::Pos(tokens, 1000000);
-//            ASTPtr value;
-//            Expected expected;
-//            ParserList{std::make_unique<ParserSSHList>(), std::make_unique<ParserToken>(TokenType::Spaceship), false}.parse(pos, value, expected);
-//            size_t keys_amount = value->children.size();
-            std::vector<String>parsed;
-            std::string curr;
-            for (size_t j = 0; j < file_size; j++){
-                if (isspace(buff[j])){
-                    if (curr.size() > 0){
-                        parsed.push_back(curr);
-                        curr.clear();
-                    }
-                } else {
-                    curr+=buff[j];
-                }
-            }
-            if (curr.size()){
-                parsed.push_back(curr);
-            }
-            for (size_t j = 1; j < parsed.size(); j+=2){
-
-//                const auto & ssh_key = value->children[j]->as<ASTPublicSSHKey &>();
-//                const auto & key_base64 = ssh_key.key_base64;
-//                const auto & type = ssh_key.type;
-                //const auto & ssh_key = value->children[j]->as<ASTPublicSSHKey &>();
-                const auto & key_base64 = parsed[j];
-                const auto & type =  parsed[j-1];
+            auto sshKeyTypeValues = ParserSSHList::parse(external_list);
+            for (auto& [type, key_base64]: sshKeyTypeValues){
                 try
                 {
                     keys.emplace_back(ssh::SSHKeyFactory::makePublicFromBase64(key_base64, type));
@@ -429,6 +383,7 @@ AuthenticationData AuthenticationData::fromAST(const ASTAuthenticationData & que
                 }
             }
         }
+        auth_data.setSSHKeys(std::move(keys));
         return auth_data;
     }
 

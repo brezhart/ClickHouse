@@ -1,53 +1,54 @@
 #include <Parsers/Access/ParserSSHList.h>
 #include <Parsers/Access/ASTPublicSSHKey.h>
+#include <Parsers/Access/ASTExternalSSHList.h>
+#include <IO/ReadWriteBufferFromHTTP.h>
 
 #include <Parsers/CommonParsers.h>
 #include <Parsers/parseIdentifierOrStringLiteral.h>
 
-
 namespace DB
 {
-
-namespace
+std::vector<std::pair<String, String>> ParserSSHList::parse(const ASTExternalSSHList & external_list)
 {
-bool parseSSHList(IParserBase::Pos & pos, Expected & expected, std::shared_ptr<ASTPublicSSHKey> & ast)
-{
-    return IParserBase::wrapParseImpl(pos, [&]
-      {
-          String key_base64;
-          String type = "ssh-ed25519";
-          if (!ParserKeyword{"ssh"}.ignore(pos, expected)){
-              return false;
-          }
-          if (pos->type == TokenType::Minus){
-              ++pos;
-          } else {
-              return false;
-          }
-          if (!ParserKeyword{"rsa"}.ignore(pos, expected)){
-              return false;
-          }
+    auto login = external_list.login;
+    auto service = external_list.service;
+    Poco::URI uri("http://github.com/" + login + ".keys");
+    Poco::Net::HTTPBasicCredentials creds{};
 
-          if (!parseIdentifierOrStringLiteral(pos, expected, key_base64)){
-              return false;
-          }
-          ast = std::make_shared<ASTPublicSSHKey>();
-          ast->key_base64 = std::move(key_base64);
-          ast->type = std::move(type);
-          return true;
-      });
+    std::unique_ptr<ReadWriteBufferFromHTTP> in = std::make_unique<ReadWriteBufferFromHTTP>(
+        uri, Poco::Net::HTTPRequest::HTTP_GET, nullptr, ConnectionTimeouts{}, creds, DBMS_DEFAULT_BUFFER_SIZE, 2);
+    size_t file_size = in->getFileInfo().file_size.value();
+    char * buff = static_cast<char *>(malloc(file_size));
+
+    [[maybe_unused]] size_t readed = in->read(buff, file_size);
+    std::vector<std::pair<String, String>> sshKeyTypeValues;
+    std::string curr;
+    bool itr = false;
+    for (size_t j = 0; j <= file_size; j++)
+    {
+        if (j == file_size || isspace(buff[j]))
+        {
+            if (curr.size() > 0)
+            {
+                if (!itr)
+                {
+                    sshKeyTypeValues.push_back({"", ""});
+                    sshKeyTypeValues.back().first = curr;
+                }
+                else
+                {
+                    sshKeyTypeValues.back().second = curr;
+                }
+                itr ^= true;
+                curr.clear();
+            }
+        }
+        else
+        {
+            curr += buff[j];
+        }
+    }
+    free(buff);
+    return sshKeyTypeValues;
 }
-}
-
-
-bool ParserSSHList::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
-{
-    std::shared_ptr<ASTPublicSSHKey> res;
-    if (!parseSSHList(pos, expected, res))
-        return false;
-
-    node = res;
-    return true;
-}
-
 }

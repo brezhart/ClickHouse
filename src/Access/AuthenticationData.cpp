@@ -328,6 +328,7 @@ std::shared_ptr<ASTAuthenticationData> AuthenticationData::toAST() const
         }
         case AuthenticationType::EXTERNAL_SSH_LIST:
         {
+            // NOT REACHABLE I THINK
             node->type = AuthenticationType::SSH_KEY;
             break;
         }

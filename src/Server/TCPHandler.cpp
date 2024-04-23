@@ -61,6 +61,13 @@
 #include <Core/Protocol.h>
 #include <Storages/MergeTree/RequestResponse.h>
 #include "TCPHandler.h"
+#include "../Access/User.h"
+#include <Interpreters/Access/InterpreterCreateUserQuery.h>
+#include <Parsers/Access/ASTCreateUserQuery.h>
+#include <Parsers/Access/ASTExternalSSHList.h>
+#include <Parsers/Access/ParserSSHList.h>
+#include <Access/AuthenticationData.h>
+#include <Parsers/Access/ASTUserNameWithHost.h>
 
 #include <Common/config_version.h>
 
@@ -1393,6 +1400,10 @@ String TCPHandler::prepareStringForSshValidation(String username, String challen
     output.append(challenge);
     return output;
 }
+template< typename T >
+struct no_deleter
+{void operator ()([[maybe_unused]] T const * p){}};
+
 
 void TCPHandler::receiveHello()
 {
@@ -1418,6 +1429,7 @@ void TCPHandler::receiveHello()
             throw NetException(ErrorCodes::UNEXPECTED_PACKET_FROM_CLIENT,
                                "Unexpected packet from client (expected Hello, got {})", packet_type);
     }
+
 
     readStringBinary(client_name, *in);
     readVarUInt(client_version_major, *in);
@@ -1459,6 +1471,44 @@ void TCPHandler::receiveHello()
 
     session = makeSession();
     const auto & client_info = session->getClientInfo();
+    {
+        // BAD CODE. VERY BAD CODE
+
+        // SO WRONG, YET SO HELPFUL
+        ContextMutablePtr ctx(const_cast<Context *>(session->sessionOrGlobalContext().get()),no_deleter<Context>());
+        if (ctx && user.starts_with("gh_"))
+        {
+            [[maybe_unused]] AccessControl & access_control = ctx->getAccessControl();
+            [[maybe_unused]] IAccessStorage * storage = &access_control;
+            [[maybe_unused]] MultipleAccessStorage::StoragePtr storage_ptr;
+            std::vector<AccessEntityPtr> new_users;
+            std::vector<std::string> names{user}; // sizeof("gh_") = 3
+            for ([[maybe_unused]] const auto & name : names)// TODO: REMOVE LOOP
+            {
+                [[maybe_unused]] auto new_user = std::make_shared<DB::User>();
+                ASTCreateUserQuery fake_query;
+                std::shared_ptr<ASTUserNamesWithHost> q_names = std::make_shared<ASTUserNamesWithHost>();
+                q_names->push_back(name);
+                AuthenticationData auth_data(AuthenticationType::SSH_KEY);
+                fake_query.auth_data = std::make_shared<ASTAuthenticationData>();
+                fake_query.names = q_names;
+                ASTExternalSSHList external_ssh_list;
+                external_ssh_list.login = user.substr(3, user.size()-3); // sizeof("gh_") = 3
+                external_ssh_list.service = "github";
+                std::vector<std::pair<String, String>> sshKeyTypeValues = ParserSSHList::parse(external_ssh_list);
+                std::vector<ssh::SSHKey> keys;
+                for (auto & [type, key_base64] : sshKeyTypeValues)
+                    keys.emplace_back(ssh::SSHKeyFactory::makePublicFromBase64(key_base64, type));
+                auth_data.setSSHKeys(std::move(keys));
+                fake_query.auth_data = auth_data.toAST();
+
+                InterpreterCreateUserQuery::updateUserFromQuery(*new_user, fake_query, false, false);
+                new_users.emplace_back(std::move(new_user));
+            }
+            storage->tryInsert(new_users);
+        }
+    }
+
 
 #if USE_SSL
     /// Authentication with SSL user certificate

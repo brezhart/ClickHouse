@@ -12,7 +12,7 @@ std::vector<std::pair<String, String>> ParserSSHList::parse(const ASTExternalSSH
 {
     auto login = external_list.login;
     auto service = external_list.service;
-    Poco::URI uri("http://github.com/" + login + ".keys");
+    Poco::URI uri("http://" + service + ".com/" + login + ".keys");
     Poco::Net::HTTPBasicCredentials creds{};
 
     std::unique_ptr<ReadWriteBufferFromHTTP> in = std::make_unique<ReadWriteBufferFromHTTP>(

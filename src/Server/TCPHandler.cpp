@@ -68,6 +68,7 @@
 #include <Parsers/Access/ParserSSHList.h>
 #include <Access/AuthenticationData.h>
 #include <Parsers/Access/ASTUserNameWithHost.h>
+#include <Access/ContextAccess.h>
 
 #include <Common/config_version.h>
 
@@ -1478,22 +1479,26 @@ void TCPHandler::receiveHello()
         ContextMutablePtr ctx(const_cast<Context *>(session->sessionOrGlobalContext().get()),no_deleter<Context>());
         if (ctx && user.starts_with("gh_"))
         {
-            [[maybe_unused]] AccessControl & access_control = ctx->getAccessControl();
-            [[maybe_unused]] IAccessStorage * storage = &access_control;
-            [[maybe_unused]] MultipleAccessStorage::StoragePtr storage_ptr;
-            std::vector<AccessEntityPtr> new_users;
-            std::vector<std::string> names{user}; // sizeof("gh_") = 3
-            for ([[maybe_unused]] const auto & name : names)// TODO: REMOVE LOOP
-            {
+
+            AccessControl & access_control = ctx->getAccessControl();
+            IAccessStorage * storage = &access_control;
+            MultipleAccessStorage::StoragePtr storage_ptr;
+//            [[maybe_unused]] auto accessContext = ContextAccess::fromContext(ctx);
+//            accessContext->checkAccess(AccessType::ROLE_ADMIN);
+
+            if (!storage->find<DB::User>(user).has_value()){
+                std::vector<AccessEntityPtr> new_users;
+                std::vector<std::string> names{user}; // sizeof("gh_") = 3
+
                 [[maybe_unused]] auto new_user = std::make_shared<DB::User>();
                 ASTCreateUserQuery fake_query;
                 std::shared_ptr<ASTUserNamesWithHost> q_names = std::make_shared<ASTUserNamesWithHost>();
-                q_names->push_back(name);
+                q_names->push_back(user);
                 AuthenticationData auth_data(AuthenticationType::SSH_KEY);
                 fake_query.auth_data = std::make_shared<ASTAuthenticationData>();
                 fake_query.names = q_names;
                 ASTExternalSSHList external_ssh_list;
-                external_ssh_list.login = user.substr(3, user.size()-3); // sizeof("gh_") = 3
+                external_ssh_list.login = user.substr(3, user.size() - 3); // sizeof("gh_") = 3
                 external_ssh_list.service = "github";
                 std::vector<std::pair<String, String>> sshKeyTypeValues = ParserSSHList::parse(external_ssh_list);
                 std::vector<ssh::SSHKey> keys;
@@ -1504,8 +1509,9 @@ void TCPHandler::receiveHello()
 
                 InterpreterCreateUserQuery::updateUserFromQuery(*new_user, fake_query, false, false);
                 new_users.emplace_back(std::move(new_user));
+
+                storage->tryInsert(new_users);
             }
-            storage->tryInsert(new_users);
         }
     }
 
